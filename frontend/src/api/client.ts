@@ -1,6 +1,6 @@
 import { AnalysisResult } from '../types/analysis';
 
-const API_BASE = 'https://YOUR-BACKEND-URL.onrender.com/api';
+const API_BASE = 'https://js-log-analyzer-backend.onrender.com/api';
 
 export async function analyzeFile(file: File): Promise<AnalysisResult> {
   const formData = new FormData();

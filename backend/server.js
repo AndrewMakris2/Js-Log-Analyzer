@@ -14,7 +14,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors({ origin: 'http://localhost:5173' })); // Vite dev server
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'https://js-log-analyzer.onrender.com'
+  ]
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Multer - store uploaded files in memory (no disk writes)
