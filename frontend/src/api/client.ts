@@ -1,12 +1,7 @@
-// client.ts - API call wrapper for backend communication
-
 import { AnalysisResult } from '../types/analysis';
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = 'https://YOUR-BACKEND-URL.onrender.com/api';
 
-/**
- * Uploads a file for analysis
- */
 export async function analyzeFile(file: File): Promise<AnalysisResult> {
   const formData = new FormData();
   formData.append('file', file);
@@ -24,9 +19,6 @@ export async function analyzeFile(file: File): Promise<AnalysisResult> {
   return response.json();
 }
 
-/**
- * Analyzes a built-in sample log
- */
 export async function analyzeSample(
   sample: 'cloudtrail' | 'authlog' | 'siem'
 ): Promise<AnalysisResult> {
