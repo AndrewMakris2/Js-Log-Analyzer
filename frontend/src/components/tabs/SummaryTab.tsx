@@ -1,5 +1,4 @@
-// SummaryTab.tsx - Executive summary + severity gauge
-
+import React from 'react';
 import { Score } from '../../types/analysis';
 import { CheckCircle, AlertTriangle, AlertOctagon, Info } from 'lucide-react';
 
@@ -25,13 +24,12 @@ const SCORE_LABEL_COLOR = (val: number) => {
 function FindingIcon({ text }: { text: string }) {
   const lower = text.toLowerCase();
   if (lower.includes('critical') || lower.includes('high')) return <AlertOctagon className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />;
-  if (lower.includes('anomal') || lower.includes('suspicious')) return <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />;
+  if (lower.includes('anomal') || lower.includes('suspicious') || lower.includes('deviation')) return <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />;
   if (lower.includes('no ') || lower.includes('normal')) return <CheckCircle className="w-4 h-4 text-green-400 shrink-0 mt-0.5" />;
   return <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />;
 }
 
 export default function SummaryTab({ summary, score }: Props) {
-  // SVG circle gauge
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (score.value / 100) * circumference;
@@ -55,9 +53,7 @@ export default function SummaryTab({ summary, score }: Props) {
           </h2>
           <div className="relative">
             <svg width="140" height="140" className="-rotate-90">
-              {/* Background circle */}
               <circle cx="70" cy="70" r={radius} fill="none" stroke="#2a2d3a" strokeWidth="10" />
-              {/* Score arc */}
               <circle
                 cx="70" cy="70" r={radius}
                 fill="none"

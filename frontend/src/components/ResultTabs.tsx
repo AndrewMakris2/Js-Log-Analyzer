@@ -1,4 +1,4 @@
-// ResultTabs.tsx - Tab container for all result views
+// ResultTabs.tsx - Updated with Baseline tab
 
 import { useState } from 'react';
 import { AnalysisResult, FilterState, NormalizedEvent } from '../types/analysis';
@@ -7,6 +7,7 @@ import AnomaliesTab from './tabs/AnomaliesTab';
 import SequencesTab from './tabs/SequencesTab';
 import IndicatorsTab from './tabs/IndicatorsTab';
 import RawEventsTab from './tabs/RawEventsTab';
+import BaselineTab from './tabs/BaselineTab';
 import Timeline from './Timeline';
 
 interface Props {
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'anomalies', label: 'Anomalies' },
   { id: 'sequences', label: 'Sequences' },
   { id: 'indicators', label: 'Indicators' },
+  { id: 'baseline', label: 'Baseline' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'raw', label: 'Raw Events' },
 ];
@@ -40,9 +42,8 @@ export default function ResultTabs({ result, filters }: Props) {
   return (
     <div className="space-y-4">
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-[#2a2d3a]">
+      <div className="flex gap-1 border-b border-[#2a2d3a] overflow-x-auto">
         {TABS.map((tab) => {
-          // Show counts on some tabs
           let badge: number | null = null;
           if (tab.id === 'anomalies') badge = result.anomalies.length;
           if (tab.id === 'sequences') badge = result.sequences.length;
@@ -52,7 +53,7 @@ export default function ResultTabs({ result, filters }: Props) {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`
-                flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors
+                flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap
                 ${activeTab === tab.id
                   ? 'border-indigo-500 text-indigo-400'
                   : 'border-transparent text-slate-400 hover:text-white'
@@ -78,6 +79,7 @@ export default function ResultTabs({ result, filters }: Props) {
         {activeTab === 'anomalies' && <AnomaliesTab anomalies={result.anomalies} />}
         {activeTab === 'sequences' && <SequencesTab sequences={result.sequences} />}
         {activeTab === 'indicators' && <IndicatorsTab indicators={result.indicators} />}
+        {activeTab === 'baseline' && <BaselineTab baseline={result.baseline} />}
         {activeTab === 'timeline' && <Timeline events={filteredEvents} />}
         {activeTab === 'raw' && <RawEventsTab events={filteredEvents} totalEvents={result.totalEvents} />}
       </div>

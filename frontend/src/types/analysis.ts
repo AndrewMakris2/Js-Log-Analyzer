@@ -1,5 +1,3 @@
-// analysis.ts - Shared TypeScript types matching backend output schema
-
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'unknown';
 export type EventType = 'auth' | 'network' | 'iam' | 'process' | 'unknown';
 export type EventStatus = 'success' | 'failure' | 'unknown';
@@ -79,6 +77,31 @@ export interface AnalysisMeta {
   chunksProcessed: number;
 }
 
+// NEW - Baseline types
+export interface UserProfile {
+  totalEvents: number;
+  normalActions: string[];
+  ips: string[];
+  failureRate: number;
+  normalHours: number[];
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+export interface BaselineSummary {
+  totalEvents: number;
+  uniqueUsers: number;
+  uniqueIPs: number;
+  normalHours: number[];
+  mostActiveDay: string;
+  mostActiveHours: string[];
+  avgHourlyVolume: number;
+  normalFailureRate: string;
+  topActions: { action: string; count: number }[];
+  userCount: number;
+  userProfiles: Record<string, UserProfile>;
+}
+
 export interface AnalysisResult {
   meta: AnalysisMeta;
   summary: {
@@ -89,6 +112,7 @@ export interface AnalysisResult {
   sequences: Sequence[];
   indicators: Indicators;
   score: Score;
+  baseline: BaselineSummary | null;
   events: NormalizedEvent[];
   totalEvents: number;
 }

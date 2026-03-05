@@ -1,5 +1,4 @@
-// analyze.js - Main API route
-// POST /api/analyze - accepts file upload and returns full analysis
+// analyze.js - Main API route - updated to include baseline analysis
 
 import express from 'express';
 import multer from 'multer';
@@ -10,31 +9,25 @@ import { extractIndicators } from '../analyzers/indicatorExtractor.js';
 import { calculateScore } from '../analyzers/scorer.js';
 import { summarizeWithLLM } from '../llm/summarizer.js';
 import { chunkEvents } from '../utils/chunker.js';
+import { buildBaseline, detectBaselineDeviations, summarizeBaseline } from '../analyzers/baselineAnalyzer.js';
 
 export const analyzeRouter = express.Router();
 
-// Multer config - memory storage, 50MB limit
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
-/**
- * POST /api/analyze
- * Accepts multipart form with 'file' field
- * Returns full analysis JSON
- */
 analyzeRouter.post('/analyze', upload.single('file'), async (req, res) => {
   try {
-    // Validate file was uploaded
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
     const { originalname, mimetype, buffer, size } = req.file;
-    console.log(`Analyzing file: ${originalname} (${(size / 1024).toFixed(1)}KB, ${mimetype})`);
+    console.log(`Analyzing file: ${originalname} (${(size / 1024).toFixed(1)}KB)`);
 
-    // Step 1: Parse the file into normalized events
+    // Step 1: Parse
     const parseResult = parseFile(buffer, originalname, mimetype);
     const { events, confidence, format, meta } = parseResult;
 
@@ -48,28 +41,38 @@ analyzeRouter.post('/analyze', upload.single('file'), async (req, res) => {
 
     console.log(`Parsed ${events.length} events with ${(confidence * 100).toFixed(0)}% confidence`);
 
-    // Step 2: Chunk events if large (for LLM processing)
+    // Step 2: Chunk
     const chunks = chunkEvents(events, 500);
 
-    // Step 3: Run rule-based analysis (non-LLM, runs on all events)
-    const anomalies = detectAnomalies(events);
-    const sequences = detectSequences(events);
-    const indicators = extractIndicators(events);
-    const score = calculateScore(anomalies, sequences, events);
+    // Step 3: Build baseline from ALL events
+    const baseline = buildBaseline(events);
+    const baselineDeviations = detectBaselineDeviations(events, baseline);
+    const baselineSummary = summarizeBaseline(baseline);
 
-    // Step 4: LLM enrichment (mock or real depending on API key)
+    // Step 4: Rule-based analysis on ALL events
+    const ruleAnomalies = detectAnomalies(events);
+    const sequences = detectSequences(events);
+
+    // Combine rule anomalies + baseline deviations
+    const allAnomalies = [...ruleAnomalies, ...baselineDeviations];
+
+    const indicators = extractIndicators(events);
+    const score = calculateScore(allAnomalies, sequences, events);
+
+    // Step 5: LLM enrichment
     const llmResult = await summarizeWithLLM({
-      normalizedEvents: events.slice(0, 100), // Send sample to LLM
-      anomalies,
+      normalizedEvents: events.slice(0, 100),
+      anomalies: allAnomalies,
       sequences,
       indicators,
       score,
+      baseline: baselineSummary,
+      totalEvents: events.length, // Pass real total
       mode: chunks.length > 1 ? 'chunked' : 'full',
     });
 
-    // Step 5: Build final response
+    // Step 6: Build response
     const response = {
-      // Parsing metadata
       meta: {
         filename: originalname,
         format,
@@ -80,17 +83,12 @@ analyzeRouter.post('/analyze', upload.single('file'), async (req, res) => {
         chunksProcessed: chunks.length,
         ...meta,
       },
-      // LLM-generated summary
       summary: llmResult.summary,
-      // Anomalies (enriched by LLM if available)
-      anomalies: llmResult.enrichedAnomalies || anomalies,
-      // Suspicious sequences
+      anomalies: llmResult.enrichedAnomalies || allAnomalies,
       sequences: llmResult.enrichedSequences || sequences,
-      // Top indicators
       indicators,
-      // Severity score
       score,
-      // Raw events (paginated - first 200 for UI)
+      baseline: baselineSummary,
       events: events.slice(0, 200),
       totalEvents: events.length,
     };
@@ -106,11 +104,6 @@ analyzeRouter.post('/analyze', upload.single('file'), async (req, res) => {
   }
 });
 
-/**
- * POST /api/analyze/sample
- * Analyzes one of the built-in sample logs
- * Body: { sample: 'cloudtrail' | 'authlog' | 'siem' }
- */
 analyzeRouter.post('/analyze/sample', async (req, res) => {
   try {
     const { sample } = req.body;
@@ -132,17 +125,23 @@ analyzeRouter.post('/analyze/sample', async (req, res) => {
     const parseResult = parseFile(buffer, filename, 'text/plain');
     const { events, confidence, format, meta } = parseResult;
 
-    const anomalies = detectAnomalies(events);
+    const baseline = buildBaseline(events);
+    const baselineDeviations = detectBaselineDeviations(events, baseline);
+    const baselineSummary = summarizeBaseline(baseline);
+    const ruleAnomalies = detectAnomalies(events);
+    const allAnomalies = [...ruleAnomalies, ...baselineDeviations];
     const sequences = detectSequences(events);
     const indicators = extractIndicators(events);
-    const score = calculateScore(anomalies, sequences, events);
+    const score = calculateScore(allAnomalies, sequences, events);
 
     const llmResult = await summarizeWithLLM({
       normalizedEvents: events.slice(0, 100),
-      anomalies,
+      anomalies: allAnomalies,
       sequences,
       indicators,
       score,
+      baseline: baselineSummary,
+      totalEvents: events.length,
       mode: 'full',
     });
 
@@ -158,10 +157,11 @@ analyzeRouter.post('/analyze/sample', async (req, res) => {
         ...meta,
       },
       summary: llmResult.summary,
-      anomalies: llmResult.enrichedAnomalies || anomalies,
+      anomalies: llmResult.enrichedAnomalies || allAnomalies,
       sequences: llmResult.enrichedSequences || sequences,
       indicators,
       score,
+      baseline: baselineSummary,
       events: events.slice(0, 200),
       totalEvents: events.length,
     });
@@ -172,81 +172,17 @@ analyzeRouter.post('/analyze/sample', async (req, res) => {
   }
 });
 
-// ─── Sample Log Data ───────────────────────────────────────────────────────────
-
 function getSampleCloudTrail() {
   return JSON.stringify({
     Records: [
-      {
-        eventTime: '2024-01-15T10:23:45Z',
-        eventName: 'ConsoleLogin',
-        eventSource: 'signin.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userAgent: 'Mozilla/5.0',
-        userIdentity: { type: 'IAMUser', userName: 'alice', arn: 'arn:aws:iam::123456789:user/alice' },
-        errorCode: 'Failed authentication',
-        responseElements: { ConsoleLogin: 'Failure' },
-      },
-      {
-        eventTime: '2024-01-15T10:24:10Z',
-        eventName: 'ConsoleLogin',
-        eventSource: 'signin.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userAgent: 'Mozilla/5.0',
-        userIdentity: { type: 'IAMUser', userName: 'alice', arn: 'arn:aws:iam::123456789:user/alice' },
-        errorCode: 'Failed authentication',
-        responseElements: { ConsoleLogin: 'Failure' },
-      },
-      {
-        eventTime: '2024-01-15T10:24:55Z',
-        eventName: 'ConsoleLogin',
-        eventSource: 'signin.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userAgent: 'Mozilla/5.0',
-        userIdentity: { type: 'IAMUser', userName: 'alice', arn: 'arn:aws:iam::123456789:user/alice' },
-        responseElements: { ConsoleLogin: 'Success' },
-      },
-      {
-        eventTime: '2024-01-15T10:26:00Z',
-        eventName: 'AssumeRole',
-        eventSource: 'sts.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userIdentity: { type: 'IAMUser', userName: 'alice' },
-        requestParameters: { roleArn: 'arn:aws:iam::123456789:role/AdminRole' },
-      },
-      {
-        eventTime: '2024-01-15T10:27:30Z',
-        eventName: 'PutRolePolicy',
-        eventSource: 'iam.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userIdentity: { type: 'IAMUser', userName: 'alice' },
-        requestParameters: { roleName: 'AdminRole', policyName: 'FullAccess' },
-      },
-      {
-        eventTime: '2024-01-15T10:30:00Z',
-        eventName: 'GetObject',
-        eventSource: 's3.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userIdentity: { type: 'IAMUser', userName: 'alice' },
-        resources: [{ ARN: 'arn:aws:s3:::sensitive-data-bucket/secrets.txt' }],
-      },
-      {
-        eventTime: '2024-01-15T10:31:00Z',
-        eventName: 'GetObject',
-        eventSource: 's3.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userIdentity: { type: 'IAMUser', userName: 'alice' },
-        resources: [{ ARN: 'arn:aws:s3:::sensitive-data-bucket/credentials.json' }],
-        errorCode: 'AccessDenied',
-      },
-      {
-        eventTime: '2024-01-15T10:32:00Z',
-        eventName: 'CreateUser',
-        eventSource: 'iam.amazonaws.com',
-        sourceIPAddress: '203.0.113.42',
-        userIdentity: { type: 'IAMUser', userName: 'alice' },
-        requestParameters: { userName: 'backdoor-user' },
-      },
+      { eventTime: '2024-01-15T10:23:45Z', eventName: 'ConsoleLogin', eventSource: 'signin.amazonaws.com', sourceIPAddress: '203.0.113.42', userAgent: 'Mozilla/5.0', userIdentity: { type: 'IAMUser', userName: 'alice' }, errorCode: 'Failed authentication' },
+      { eventTime: '2024-01-15T10:24:10Z', eventName: 'ConsoleLogin', eventSource: 'signin.amazonaws.com', sourceIPAddress: '203.0.113.42', userAgent: 'Mozilla/5.0', userIdentity: { type: 'IAMUser', userName: 'alice' }, errorCode: 'Failed authentication' },
+      { eventTime: '2024-01-15T10:24:55Z', eventName: 'ConsoleLogin', eventSource: 'signin.amazonaws.com', sourceIPAddress: '203.0.113.42', userAgent: 'Mozilla/5.0', userIdentity: { type: 'IAMUser', userName: 'alice' }, responseElements: { ConsoleLogin: 'Success' } },
+      { eventTime: '2024-01-15T10:26:00Z', eventName: 'AssumeRole', eventSource: 'sts.amazonaws.com', sourceIPAddress: '203.0.113.42', userIdentity: { type: 'IAMUser', userName: 'alice' }, requestParameters: { roleArn: 'arn:aws:iam::123456789:role/AdminRole' } },
+      { eventTime: '2024-01-15T10:27:30Z', eventName: 'PutRolePolicy', eventSource: 'iam.amazonaws.com', sourceIPAddress: '203.0.113.42', userIdentity: { type: 'IAMUser', userName: 'alice' }, requestParameters: { roleName: 'AdminRole', policyName: 'FullAccess' } },
+      { eventTime: '2024-01-15T10:30:00Z', eventName: 'GetObject', eventSource: 's3.amazonaws.com', sourceIPAddress: '203.0.113.42', userIdentity: { type: 'IAMUser', userName: 'alice' }, resources: [{ ARN: 'arn:aws:s3:::sensitive-data-bucket/secrets.txt' }] },
+      { eventTime: '2024-01-15T10:31:00Z', eventName: 'GetObject', eventSource: 's3.amazonaws.com', sourceIPAddress: '203.0.113.42', userIdentity: { type: 'IAMUser', userName: 'alice' }, resources: [{ ARN: 'arn:aws:s3:::sensitive-data-bucket/credentials.json' }], errorCode: 'AccessDenied' },
+      { eventTime: '2024-01-15T10:32:00Z', eventName: 'CreateUser', eventSource: 'iam.amazonaws.com', sourceIPAddress: '203.0.113.42', userIdentity: { type: 'IAMUser', userName: 'alice' }, requestParameters: { userName: 'backdoor-user' } },
     ],
   });
 }
